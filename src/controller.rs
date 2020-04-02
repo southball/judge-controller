@@ -219,7 +219,7 @@ pub async fn process_submission(opts: &Opts, submission_id: i32) -> Result<(), B
     let testcases_url = problem_base_url.join("testcases").unwrap();
     let checker_url = problem_base_url.join("checker").unwrap();
     let interactor_url = problem_base_url.join("interactor").unwrap();
-    let testlib_url = session.resolve_single("admin/testlib.h");
+    let testlib_url = session.resolve_single("admin/testlib");
 
     let resource_folder = std::path::PathBuf::from(&opts.folder).join(&submission.problem_slug);
     let temp_folder = std::path::PathBuf::from(&opts.temp);
@@ -243,6 +243,8 @@ pub async fn process_submission(opts: &Opts, submission_id: i32) -> Result<(), B
             let last_download: DateTime<Utc> = DateTime::from_str(&last_download_str)?;
             let last_update: DateTime<Utc> = DateTime::from_str(&problem.last_update)?;
 
+            log::info!("Last download: {}", last_download);
+            log::info!("Last update: {}", last_update);
             last_download < last_update
         }
     };
