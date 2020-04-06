@@ -236,6 +236,10 @@ pub async fn process_submission(opts: &Opts, submission_id: i32) -> Result<(), B
 
     std::fs::write(&source_path, &submission.source_code);
 
+    if verdict_path.exists() {
+        std::fs::remove_file(&verdict_path)?;
+    }
+
     let should_download = {
         if !resource_folder.exists() { true }
         else {
@@ -317,7 +321,18 @@ pub async fn process_submission(opts: &Opts, submission_id: i32) -> Result<(), B
 
     child.wait()?;
 
-    let verdict: judge_definitions::JudgeOutput = serde_json::from_str(&std::fs::read_to_string(verdict_path).unwrap()).unwrap();
+    let verdict: judge_definitions::JudgeOutput;
+    if verdict_path.exists() {
+        verdict = serde_json::from_str(&std::fs::read_to_string(verdict_path).unwrap()).unwrap();
+    } else {
+        verdict = judge_definitions::JudgeOutput {
+            verdict: judge_definitions::verdicts::VERDICT_SE.into(),
+            time: 0.,
+            memory: 0,
+            testcases: vec![],
+        };
+    }
+
     let response = client
         .put(session.resolve(vec!["submission/", &format!("{}/", submission_id), "judge"]))
         .bearer_auth(session.get_access_token().await)
