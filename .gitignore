@@ -1,3 +1,5 @@
 /target
 /.idea
 /launch.sh
+/data
+/temp

@@ -44,7 +44,10 @@ async fn main() -> () {
 
         let channel = conn.create_channel().await.expect("Failed to create channel.");
         channel.basic_qos(1, BasicQosOptions::default()).await.expect("Failed to set prefetch count.");
-        // let queue = channel.queue_declare("JUDGE_QUEUE", QueueDeclareOptions::default(), FieldTable::default());
+        let queue = channel.queue_declare("JUDGE_QUEUE", QueueDeclareOptions {
+            durable: true,
+            ..QueueDeclareOptions::default()
+        }, FieldTable::default());
 
         log::info!("Starting consumer...");
         let consumer = channel.basic_consume("JUDGE_QUEUE", "judge-controller", BasicConsumeOptions::default(), FieldTable::default())

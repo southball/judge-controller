@@ -38,6 +38,10 @@ pub struct Opts {
     #[clap(long = "sandboxes")]
     pub sandboxes: i32,
 
+    /// The checker language to be passed to the judge.
+    #[clap(long = "checker-language")]
+    pub checker_language: String,
+
     /// The file containing the language definitions.
     #[clap(long = "language-definition")]
     pub language_definition: String,

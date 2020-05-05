@@ -234,7 +234,7 @@ pub async fn process_submission(opts: &Opts, submission_id: i32) -> Result<(), B
     let source_path = temp_folder.join("source");
     let verdict_path = temp_folder.join("verdict.json");
 
-    std::fs::write(&source_path, &submission.source_code);
+    std::fs::write(&source_path, &submission.source_code)?;
 
     if verdict_path.exists() {
         std::fs::remove_file(&verdict_path)?;
@@ -297,6 +297,8 @@ pub async fn process_submission(opts: &Opts, submission_id: i32) -> Result<(), B
         testlib_path.to_str().unwrap(),
         "--sandboxes",
         &sandboxes_count_str,
+        "--checker-language",
+        &opts.checker_language,
         "--languages-definition",
         &opts.language_definition,
         "--verdict",
@@ -327,6 +329,7 @@ pub async fn process_submission(opts: &Opts, submission_id: i32) -> Result<(), B
     } else {
         verdict = judge_definitions::JudgeOutput {
             verdict: judge_definitions::verdicts::VERDICT_SE.into(),
+            compile_message: "".to_string(),
             time: 0.,
             memory: 0,
             testcases: vec![],
