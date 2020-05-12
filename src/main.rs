@@ -1,3 +1,4 @@
+#![feature(async_closure)]
 use std::{fs, path::Path};
 
 use clap::derive::Clap;

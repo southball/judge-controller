@@ -2,6 +2,7 @@ use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::io::Write;
 use std::str::FromStr;
+use std::thread;
 
 use chrono::{DateTime, Duration, NaiveDateTime, TimeZone, Utc};
 use futures_util::stream::Stream;
@@ -26,6 +27,7 @@ struct ApiSuccess<T> {
     data: T,
 }
 
+#[derive(Clone)]
 struct Session {
     base_url: Url,
     expiry: DateTime<Utc>,
@@ -49,9 +51,11 @@ impl Session {
     }
 
     fn resolve(&self, url_fragment: Vec<&str>) -> Url {
-        url_fragment.iter().fold(
-            self.base_url.clone(),
-            |url, fragment| url.join(fragment).unwrap())
+        url_fragment
+            .iter()
+            .fold(self.base_url.clone(), |url, fragment| {
+                url.join(fragment).unwrap()
+            })
     }
 
     fn resolve_single(&self, url_fragment: &str) -> Url {
@@ -70,9 +74,11 @@ impl Session {
             .post(self.resolve_single("auth/login"))
             .json(&body)
             .send()
-            .await.unwrap()
+            .await
+            .unwrap()
             .json::<ApiSuccess<JWTTokenPair>>()
-            .await.unwrap();
+            .await
+            .unwrap();
 
         self.access_token = String::from(response.data.access_token);
         self.refresh_token = String::from(response.data.refresh_token);
@@ -82,7 +88,8 @@ impl Session {
 
     /// Recompute expiry time from `self.access_token`.
     fn recalc_expiry(&mut self) {
-        let token_message = jsonwebtoken::dangerous_unsafe_decode::<JWTClaims>(&self.access_token).unwrap();
+        let token_message =
+            jsonwebtoken::dangerous_unsafe_decode::<JWTClaims>(&self.access_token).unwrap();
         self.expiry = Utc.timestamp(token_message.claims.exp, 0);
     }
 
@@ -97,9 +104,11 @@ impl Session {
             .post(self.resolve_single("auth/refresh"))
             .json(&body)
             .send()
-            .await.unwrap()
+            .await
+            .unwrap()
             .json::<ApiSuccess<JWTTokenPair>>()
-            .await.unwrap();
+            .await
+            .unwrap();
 
         self.access_token = String::from(response.data.access_token);
         self.recalc_expiry();
@@ -129,8 +138,12 @@ struct ProblemMetadata {
     last_update: String,
 }
 
-async fn write_stream_to_file<'a, T>(stream: &mut T, path: &'a std::path::Path) -> Result<(), Box<dyn std::error::Error>>
-    where T: Stream<Item=reqwest::Result<bytes::Bytes>> + std::marker::Unpin
+async fn write_stream_to_file<'a, T>(
+    stream: &mut T,
+    path: &'a std::path::Path,
+) -> Result<(), Box<dyn std::error::Error>>
+where
+    T: Stream<Item = reqwest::Result<bytes::Bytes>> + std::marker::Unpin,
 {
     let mut file = std::fs::File::create(path).unwrap();
     while let Some(Ok(item)) = stream.next().await {
@@ -140,8 +153,15 @@ async fn write_stream_to_file<'a, T>(stream: &mut T, path: &'a std::path::Path) 
     Ok(())
 }
 
-async fn unzip<'a>(zip_path: &'a std::path::Path, folder_path: &'a std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
-    log::info!("Extracting {} to {}...", zip_path.to_str().unwrap(), folder_path.to_str().unwrap());
+async fn unzip<'a>(
+    zip_path: &'a std::path::Path,
+    folder_path: &'a std::path::Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    log::info!(
+        "Extracting {} to {}...",
+        zip_path.to_str().unwrap(),
+        folder_path.to_str().unwrap()
+    );
 
     let zip_file = std::fs::File::open(zip_path).unwrap();
     let mut archive = zip::ZipArchive::new(zip_file).unwrap();
@@ -155,7 +175,9 @@ async fn unzip<'a>(zip_path: &'a std::path::Path, folder_path: &'a std::path::Pa
             std::fs::create_dir_all(&target)?;
         } else {
             if let Some(p) = target.parent() {
-                if !p.exists() { std::fs::create_dir_all(&p)?; }
+                if !p.exists() {
+                    std::fs::create_dir_all(&p)?;
+                }
             }
             let mut sink = std::fs::File::create(&target).unwrap();
             std::io::copy(&mut file, &mut sink)?;
@@ -168,12 +190,17 @@ async fn unzip<'a>(zip_path: &'a std::path::Path, folder_path: &'a std::path::Pa
 /// Using the reqwest client `client` provided, download file from `url` to `path` using the passed
 /// `access_token`.
 async fn download_to_file<'a>(
-    client: &reqwest::Client, url: Url, path: &'a std::path::Path, access_token: &str,
+    client: &reqwest::Client,
+    url: Url,
+    path: &'a std::path::Path,
+    access_token: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut stream = client.get(url)
+    let mut stream = client
+        .get(url)
         .bearer_auth(access_token)
         .send()
-        .await.unwrap()
+        .await
+        .unwrap()
         .bytes_stream();
 
     let mut file = std::fs::File::create(path).unwrap();
@@ -185,7 +212,10 @@ async fn download_to_file<'a>(
     Ok(())
 }
 
-pub async fn process_submission(opts: &Opts, submission_id: i32) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn process_submission(
+    opts: &Opts,
+    submission_id: i32,
+) -> Result<(), Box<dyn std::error::Error>> {
     let mut session = Session::new(&opts.server);
     session.init(&opts.username, &opts.password).await;
 
@@ -193,28 +223,35 @@ pub async fn process_submission(opts: &Opts, submission_id: i32) -> Result<(), B
     let submission_id_str = submission_id.to_string();
 
     log::info!("Getting submission...");
-    let submission: PartialSubmission = client.get(session.resolve(vec!["submission/", &submission_id_str]))
+    let submission: PartialSubmission = client
+        .get(session.resolve(vec!["submission/", &submission_id_str]))
         .bearer_auth(session.get_access_token().await)
         .send()
-        .await.unwrap()
+        .await
+        .unwrap()
         .json::<ApiSuccess<PartialSubmission>>()
-        .await.unwrap()
+        .await
+        .unwrap()
         .data;
     log::debug!("Submission: {:?}", submission);
 
     log::info!("Getting problem...");
-    let problem: ProblemMetadata = client.get(session.resolve(vec!["problem/", &submission.problem_slug]))
+    let problem: ProblemMetadata = client
+        .get(session.resolve(vec!["problem/", &submission.problem_slug]))
         .bearer_auth(session.get_access_token().await)
         .send()
-        .await.unwrap()
+        .await
+        .unwrap()
         .json::<ApiSuccess<ProblemMetadata>>()
-        .await.unwrap()
+        .await
+        .unwrap()
         .data;
     log::debug!("Problem: {:?}", problem);
 
     let is_problem_interactive = &problem.problem_type == "interactive";
 
-    let problem_base_url = session.resolve(vec!["problem/", &format!("{}/", &submission.problem_slug)]);
+    let problem_base_url =
+        session.resolve(vec!["problem/", &format!("{}/", &submission.problem_slug)]);
     let metadata_url = problem_base_url.join("metadata").unwrap();
     let testcases_url = problem_base_url.join("testcases").unwrap();
     let checker_url = problem_base_url.join("checker").unwrap();
@@ -241,9 +278,11 @@ pub async fn process_submission(opts: &Opts, submission_id: i32) -> Result<(), B
     }
 
     let should_download = {
-        if !resource_folder.exists() { true }
-        else {
-            let last_download_str = std::fs::read_to_string(resource_folder.join("last-update-time.txt"))?;
+        if !resource_folder.exists() {
+            true
+        } else {
+            let last_download_str =
+                std::fs::read_to_string(resource_folder.join("last-update-time.txt"))?;
             let last_download: DateTime<Utc> = DateTime::from_str(&last_download_str)?;
             let last_update: DateTime<Utc> = DateTime::from_str(&problem.last_update)?;
 
@@ -261,19 +300,55 @@ pub async fn process_submission(opts: &Opts, submission_id: i32) -> Result<(), B
         std::fs::create_dir_all(&resource_folder)?;
 
         // Download testcases
-        std::fs::write(resource_folder.join("last-update-time.txt"), Utc::now().to_rfc3339())?;
+        std::fs::write(
+            resource_folder.join("last-update-time.txt"),
+            Utc::now().to_rfc3339(),
+        )?;
 
         // Download metadata, checker and testlib.h
-        download_to_file(&client, metadata_url, &metadata_path, session.get_access_token().await).await?;
-        download_to_file(&client, checker_url, &checker_path, session.get_access_token().await).await?;
-        download_to_file(&client, testlib_url, &testlib_path, session.get_access_token().await).await?;
+        download_to_file(
+            &client,
+            metadata_url,
+            &metadata_path,
+            session.get_access_token().await,
+        )
+        .await?;
+        download_to_file(
+            &client,
+            checker_url,
+            &checker_path,
+            session.get_access_token().await,
+        )
+        .await?;
+        download_to_file(
+            &client,
+            testlib_url,
+            &testlib_path,
+            session.get_access_token().await,
+        )
+        .await?;
         if is_problem_interactive {
-            download_to_file(&client, interactor_url, &interactor_path, session.get_access_token().await).await?;
+            download_to_file(
+                &client,
+                interactor_url,
+                &interactor_path,
+                session.get_access_token().await,
+            )
+            .await?;
         }
 
         // Download testcases
-        download_to_file(&client, testcases_url, &testcases_zip_path, session.get_access_token().await).await?;
-        log::info!("Compressed testcases for problem {} downloaded. Extracting...", &submission.problem_slug);
+        download_to_file(
+            &client,
+            testcases_url,
+            &testcases_zip_path,
+            session.get_access_token().await,
+        )
+        .await?;
+        log::info!(
+            "Compressed testcases for problem {} downloaded. Extracting...",
+            &submission.problem_slug
+        );
 
         unzip(&testcases_zip_path, &testcases_path).await?;
         std::fs::remove_file(&testcases_zip_path)?;
@@ -305,13 +380,98 @@ pub async fn process_submission(opts: &Opts, submission_id: i32) -> Result<(), B
         verdict_path.to_str().unwrap(),
         "--verdict-format",
         "json",
-        "-vvv"
+        "-vv",
     ];
+
+    if let Some(socket) = &opts.socket {
+        args.push("--socket");
+        args.push(socket);
+    }
 
     if is_problem_interactive {
         args.push("--interactor");
         args.push(interactor_path.to_str().unwrap());
     }
+
+    // Launch TCP listening server
+    let socket = opts.socket.clone();
+    let tcp_listener_thread = if let Some(socket) = socket {
+        let socket = socket.clone();
+        let mut session = session.clone();
+
+        log::debug!("Spawning TCP listener thread...");
+
+        Some(thread::spawn(move || {
+            let context = zmq::Context::new();
+            let requester = context.socket(zmq::SUB).unwrap();
+
+            requester
+                .connect(&socket)
+                .expect("Failed to connect to socket.");
+            requester
+                .set_subscribe(b"")
+                .expect("Failed to set subscription.");
+
+            let mut judged_testcases: i32 = 0;
+            let mut prev_request_instant = std::time::Instant::now();
+            // TODO use correct total_testcases
+            let total_testcases: i32 = 100;
+
+            let mut msg = zmq::Message::new();
+            loop {
+                requester.recv(&mut msg, 0).unwrap();
+                println!("Received message: {}", msg.as_str().unwrap());
+
+                let value: serde_json::Value = serde_json::from_str(msg.as_str().unwrap()).unwrap();
+                let event_type = value["event_type"].as_str().unwrap();
+
+                if event_type == "testcase" {
+                    // One submission received.
+                    judged_testcases += 1;
+
+                    // TODO set cooldown (e.g. 1s) for status update
+                    let mut session = session.clone();
+                    let client = reqwest::Client::new();
+
+                    if judged_testcases < total_testcases
+                        && prev_request_instant.elapsed() > std::time::Duration::from_secs(1)
+                    {
+                        prev_request_instant = std::time::Instant::now();
+                        // TODO use correct runtime instead of creating a new runtime
+                        let mut runtime = tokio::runtime::Builder::new()
+                            .basic_scheduler()
+                            .enable_io()
+                            .build()
+                            .unwrap();
+                        runtime.block_on(async move {
+                            let _response = client
+                                .put(session.resolve(vec![
+                                    "submission/",
+                                    &format!("{}/", submission_id),
+                                    "judge/progress",
+                                ]))
+                                .bearer_auth(session.get_access_token().await)
+                                .json(&json!({
+                                    "progress": judged_testcases,
+                                    "total": total_testcases,
+                                }))
+                                .send()
+                                .await;
+                        });
+                    }
+                }
+
+                if event_type == "submission" {
+                    // The judging is completed and the thread should terminate.
+                    break;
+                }
+            }
+
+            ()
+        }))
+    } else {
+        None
+    };
 
     log::info!("Start judging with arguments: {}", args.join(" "));
     let mut child = Command::new(&opts.judge)
@@ -322,6 +482,9 @@ pub async fn process_submission(opts: &Opts, submission_id: i32) -> Result<(), B
         .unwrap();
 
     child.wait()?;
+    if let Some(thread) = tcp_listener_thread {
+        thread.join().unwrap();
+    }
 
     let verdict: judge_definitions::JudgeOutput;
     if verdict_path.exists() {
@@ -341,12 +504,18 @@ pub async fn process_submission(opts: &Opts, submission_id: i32) -> Result<(), B
         .bearer_auth(session.get_access_token().await)
         .json(&verdict)
         .send()
-        .await.unwrap()
+        .await
+        .unwrap()
         .text()
-        .await.unwrap();
+        .await
+        .unwrap();
 
     log::info!("Verdict: {}", verdict.verdict);
-    log::info!("Push to {}, response: {}", session.resolve(vec!["submission/", &format!("{}/", submission_id), "judge"]), response);
+    log::info!(
+        "Push to {}, response: {}",
+        session.resolve(vec!["submission/", &format!("{}/", submission_id), "judge"]),
+        response
+    );
     log::info!("Judging finished.");
 
     Ok(())

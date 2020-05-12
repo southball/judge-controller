@@ -50,6 +50,10 @@ pub struct Opts {
     #[clap(short = "v", long = "verbose", parse(from_occurrences))]
     pub verbosity: i32,
 
+    /// The socket to bind to for TCP connection.
+    #[clap(long = "socket")]
+    pub socket: Option<String>,
+
     /// Whether the log should be suppressed. This option overrides the verbose option.
     #[clap(short = "q", long = "quiet")]
     pub quiet: bool,
