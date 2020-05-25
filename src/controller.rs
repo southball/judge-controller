@@ -136,6 +136,7 @@ struct ProblemMetadata {
     #[serde(rename = "type")]
     problem_type: String,
     last_update: String,
+    testcases: Vec<serde_yaml::Value>,
 }
 
 async fn write_stream_to_file<'a, T>(
@@ -415,7 +416,7 @@ pub async fn process_submission(
             let mut judged_testcases: i32 = 0;
             let mut prev_request_instant = std::time::Instant::now();
             // TODO use correct total_testcases
-            let total_testcases: i32 = 100;
+            let total_testcases: i32 = problem.testcases.len() as i32;
 
             let mut msg = zmq::Message::new();
             loop {
@@ -437,13 +438,10 @@ pub async fn process_submission(
                         && prev_request_instant.elapsed() > std::time::Duration::from_secs(1)
                     {
                         prev_request_instant = std::time::Instant::now();
-                        // TODO use correct runtime instead of creating a new runtime
-                        let mut runtime = tokio::runtime::Builder::new()
-                            .basic_scheduler()
-                            .enable_io()
-                            .build()
-                            .unwrap();
-                        runtime.block_on(async move {
+
+                        let mut rt = tokio::runtime::Runtime::new().unwrap();
+                        let local = tokio::task::LocalSet::new();
+                        local.block_on(&mut rt,async move {
                             let _response = client
                                 .put(session.resolve(vec![
                                     "submission/",

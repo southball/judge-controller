@@ -35,8 +35,9 @@ async fn main() -> () {
     fs::create_dir_all(Path::new(&opts.temp)).unwrap();
 
     log::debug!("Starting controller process...");
-    let mut executor = LocalPool::new();
-    executor.run_until(async {
+    // let mut executor = LocalPool::new();
+    // executor.run_until(async {
+    loop {
         let conn = Connection::connect(&opts.amqp_url, ConnectionProperties::default())
             .await
             .expect("Connection error.");
@@ -69,5 +70,6 @@ async fn main() -> () {
                     .expect("Basic ACK failed.");
             }
         }
-    })
+    }
+    // })
 }
