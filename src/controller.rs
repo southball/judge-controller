@@ -1,217 +1,12 @@
-use std::borrow::Borrow;
-use std::collections::HashMap;
-use std::io::Write;
+use crate::api::*;
+use crate::cli::Opts;
+use crate::net::*;
+use crate::session::*;
+use chrono::{DateTime, Utc};
+use serde_json::json;
+use std::process::{Command, Stdio};
 use std::str::FromStr;
 use std::thread;
-
-use chrono::{DateTime, Duration, NaiveDateTime, TimeZone, Utc};
-use futures_util::stream::Stream;
-use futures_util::StreamExt;
-use reqwest::Response;
-use serde::{Deserialize, Serialize};
-use serde_json::json;
-use url::Url;
-
-use super::cli::Opts;
-use std::process::{Command, Stdio};
-
-#[derive(Debug, Serialize, Deserialize)]
-struct JWTTokenPair {
-    access_token: String,
-    refresh_token: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct ApiSuccess<T> {
-    success: bool,
-    data: T,
-}
-
-#[derive(Clone)]
-struct Session {
-    base_url: Url,
-    expiry: DateTime<Utc>,
-    access_token: String,
-    refresh_token: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct JWTClaims {
-    exp: i64,
-}
-
-impl Session {
-    fn new(base_url: &str) -> Session {
-        Session {
-            base_url: Url::parse(base_url).unwrap(),
-            expiry: Utc.timestamp(0, 0),
-            access_token: String::new(),
-            refresh_token: String::new(),
-        }
-    }
-
-    fn resolve(&self, url_fragment: Vec<&str>) -> Url {
-        url_fragment
-            .iter()
-            .fold(self.base_url.clone(), |url, fragment| {
-                url.join(fragment).unwrap()
-            })
-    }
-
-    fn resolve_single(&self, url_fragment: &str) -> Url {
-        self.resolve(vec![url_fragment])
-    }
-
-    async fn init(&mut self, username: &str, password: &str) {
-        let client = reqwest::Client::new();
-        let body = {
-            let mut map = HashMap::new();
-            map.insert("username", username);
-            map.insert("password", password);
-            map
-        };
-        let response = client
-            .post(self.resolve_single("auth/login"))
-            .json(&body)
-            .send()
-            .await
-            .unwrap()
-            .json::<ApiSuccess<JWTTokenPair>>()
-            .await
-            .unwrap();
-
-        self.access_token = String::from(response.data.access_token);
-        self.refresh_token = String::from(response.data.refresh_token);
-
-        self.recalc_expiry();
-    }
-
-    /// Recompute expiry time from `self.access_token`.
-    fn recalc_expiry(&mut self) {
-        let token_message =
-            jsonwebtoken::dangerous_unsafe_decode::<JWTClaims>(&self.access_token).unwrap();
-        self.expiry = Utc.timestamp(token_message.claims.exp, 0);
-    }
-
-    async fn refresh(&mut self) {
-        let client = reqwest::Client::new();
-        let body = {
-            let mut map = HashMap::new();
-            map.insert("refresh_token", &self.refresh_token);
-            map
-        };
-        let response = client
-            .post(self.resolve_single("auth/refresh"))
-            .json(&body)
-            .send()
-            .await
-            .unwrap()
-            .json::<ApiSuccess<JWTTokenPair>>()
-            .await
-            .unwrap();
-
-        self.access_token = String::from(response.data.access_token);
-        self.recalc_expiry();
-    }
-
-    async fn get_access_token(&mut self) -> &str {
-        if Utc::now() + Duration::minutes(5) > self.expiry {
-            self.refresh().await;
-        }
-
-        &self.access_token
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct PartialSubmission {
-    id: i32,
-    problem_slug: String,
-    language: String,
-    source_code: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct ProblemMetadata {
-    #[serde(rename = "type")]
-    problem_type: String,
-    last_update: String,
-    testcases: Vec<serde_yaml::Value>,
-}
-
-async fn write_stream_to_file<'a, T>(
-    stream: &mut T,
-    path: &'a std::path::Path,
-) -> Result<(), Box<dyn std::error::Error>>
-where
-    T: Stream<Item = reqwest::Result<bytes::Bytes>> + std::marker::Unpin,
-{
-    let mut file = std::fs::File::create(path).unwrap();
-    while let Some(Ok(item)) = stream.next().await {
-        file.write(&item)?;
-    }
-    file.flush()?;
-    Ok(())
-}
-
-async fn unzip<'a>(
-    zip_path: &'a std::path::Path,
-    folder_path: &'a std::path::Path,
-) -> Result<(), Box<dyn std::error::Error>> {
-    log::info!(
-        "Extracting {} to {}...",
-        zip_path.to_str().unwrap(),
-        folder_path.to_str().unwrap()
-    );
-
-    let zip_file = std::fs::File::open(zip_path).unwrap();
-    let mut archive = zip::ZipArchive::new(zip_file).unwrap();
-
-    for i in 0..archive.len() {
-        let mut file = archive.by_index(i)?;
-        let filename = file.sanitized_name();
-        let target = folder_path.join(&filename);
-
-        if filename.ends_with("/") {
-            std::fs::create_dir_all(&target)?;
-        } else {
-            if let Some(p) = target.parent() {
-                if !p.exists() {
-                    std::fs::create_dir_all(&p)?;
-                }
-            }
-            let mut sink = std::fs::File::create(&target).unwrap();
-            std::io::copy(&mut file, &mut sink)?;
-        }
-    }
-
-    Ok(())
-}
-
-/// Using the reqwest client `client` provided, download file from `url` to `path` using the passed
-/// `access_token`.
-async fn download_to_file<'a>(
-    client: &reqwest::Client,
-    url: Url,
-    path: &'a std::path::Path,
-    access_token: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let mut stream = client
-        .get(url)
-        .bearer_auth(access_token)
-        .send()
-        .await
-        .unwrap()
-        .bytes_stream();
-
-    let mut file = std::fs::File::create(path).unwrap();
-    while let Some(Ok(item)) = stream.next().await {
-        file.write(&item)?;
-    }
-    file.flush()?;
-
-    Ok(())
-}
 
 pub async fn process_submission(
     opts: &Opts,
@@ -351,7 +146,7 @@ pub async fn process_submission(
             &submission.problem_slug
         );
 
-        unzip(&testcases_zip_path, &testcases_path).await?;
+        crate::util::unzip(&testcases_zip_path, &testcases_path).await?;
         std::fs::remove_file(&testcases_zip_path)?;
         log::info!("Extracted testcases.");
     }
@@ -398,7 +193,7 @@ pub async fn process_submission(
     let socket = opts.socket.clone();
     let tcp_listener_thread = if let Some(socket) = socket {
         let socket = socket.clone();
-        let mut session = session.clone();
+        let session = session.clone();
 
         log::debug!("Spawning TCP listener thread...");
 
