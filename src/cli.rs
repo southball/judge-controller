@@ -1,5 +1,5 @@
 use clap::Clap;
-use simplelog::LevelFilter;
+use log::LevelFilter;
 
 /// Judge-Controller
 /// The controller between Judge-Server and MiniJudge-Rust
@@ -72,7 +72,8 @@ pub fn calc_log_level(verbosity: i32, quiet: bool) -> LevelFilter {
             0 => LevelFilter::Warn,
             1 => LevelFilter::Info,
             2 => LevelFilter::Debug,
-            _ => LevelFilter::Trace,
+            3 => LevelFilter::Trace,
+            _ => LevelFilter::Error,
         }
     }
 }

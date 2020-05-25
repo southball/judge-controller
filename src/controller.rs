@@ -441,7 +441,7 @@ pub async fn process_submission(
 
                         let mut rt = tokio::runtime::Runtime::new().unwrap();
                         let local = tokio::task::LocalSet::new();
-                        local.block_on(&mut rt,async move {
+                        local.block_on(&mut rt, async move {
                             let _response = client
                                 .put(session.resolve(vec![
                                     "submission/",
